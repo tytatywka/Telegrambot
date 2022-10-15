@@ -1,11 +1,14 @@
 package com.example.aorrbot.service;
 
 import com.example.aorrbot.config.BotConfiguration;
+import com.example.aorrbot.model.Ads;
 import com.example.aorrbot.model.User;
+import com.example.aorrbot.repository.AdsRepository;
 import com.example.aorrbot.repository.UserRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
@@ -30,13 +33,19 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private static final String HELP_TEXT = "Информационное окно: \n\n" +
             "Нажмите /start для приветствия";
+    private static final String ONE_BUTTON = "ONE_BUTTON";
+    private static final String TWO_BUTTON = "TWO_BUTTON";
+    private static final String ERROR_TEXT = "Error occured: ";
 
     private BotConfiguration configuration;
+
+    private AdsRepository adsRepository;
 
     private UserRepository userRepository;
 
     @Autowired
-    public TelegramBot(BotConfiguration configuration, UserRepository userRepository) {
+    public TelegramBot(BotConfiguration configuration, UserRepository userRepository, AdsRepository adsRepository) {
+        this.adsRepository = adsRepository;
         this.configuration = configuration;
         this.userRepository = userRepository;
         List<BotCommand> botCommand = new ArrayList<>();
@@ -48,7 +57,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         try {
             this.execute(new SetMyCommands(botCommand, new BotCommandScopeDefault(), null));
         } catch (TelegramApiException e) {
-            log.error("Error setting: " + e.getMessage());
+            log.error(ERROR_TEXT + e.getMessage());
         }
     }
 
@@ -74,49 +83,33 @@ public class TelegramBot extends TelegramLongPollingBot {
                 for (User user : users) {
                     sendMessage(user.getChatId(), textToSend, null);
                 }
-            }
-            switch (messageText) {
-                case "/start":
+            } else {
+                switch (messageText) {
+                    case "/start":
                         registerUser(update.getMessage());
                         startCommandReceived(chatId, userName);
-                    break;
-                case "/help":
-                    sendMessage(chatId, HELP_TEXT,null);
-                    break;
-                case "/settings":
-                    settings(chatId);
-                    break;
-                default:
-                        sendMessage(chatId, "Команда не поддерживается",null);
+                        break;
+                    case "/help":
+                        sendMessage(chatId, HELP_TEXT, null);
+                        break;
+                    case "/settings":
+                        settings(chatId);
+                        break;
+                    default:
+                        sendMessage(chatId, "Команда не поддерживается", null);
+                }
             }
         } else if (update.hasCallbackQuery()) {
             String callbackData = update.getCallbackQuery().getData();
             long messageId = update.getCallbackQuery().getMessage().getMessageId();
             long chatId = update.getCallbackQuery().getMessage().getChatId();
-            if (callbackData.equals("ONE_BUTTON")) {
+            if (callbackData.equals(ONE_BUTTON)) {
                 String text = "Первая кнопка";
-                EditMessageText message = new EditMessageText();
-                message.setChatId(String.valueOf(chatId));
-                message.setText(text);
-                message.setMessageId((int) messageId);
-                try {
-                    execute(message);
-                } catch (TelegramApiException e) {
-                    log.error("Error occured: " + e.getMessage());
-                }
-            } else if (callbackData.equals("two_button")) {
+                executeMessegeText(text,chatId, messageId);
+            } else if (callbackData.equals(TWO_BUTTON)) {
                 String text = "Вторая кнопка";
-                EditMessageText message = new EditMessageText();
-                message.setChatId(String.valueOf(chatId));
-                message.setText(text);
-                message.setMessageId((int)messageId);
-                try {
-                    execute(message);
-                } catch (TelegramApiException e) {
-                    log.error("Error occured: " + e.getMessage());
-                }
+                executeMessegeText(text,chatId, messageId);
             }
-
         }
     }
 
@@ -129,20 +122,16 @@ public class TelegramBot extends TelegramLongPollingBot {
         List<InlineKeyboardButton> rowInLine = new ArrayList<>();
         var buttonOne = new InlineKeyboardButton();
         buttonOne.setText("Первая настройка");
-        buttonOne.setCallbackData("ONE_BUTTON");
+        buttonOne.setCallbackData(ONE_BUTTON);
         var buttonTwo = new InlineKeyboardButton();
         buttonTwo.setText("Вторая настройка");
-        buttonTwo.setCallbackData("two_button");
+        buttonTwo.setCallbackData(TWO_BUTTON);
         rowInLine.add(buttonOne);
         rowInLine.add(buttonTwo);
         rowsInLine.add(rowInLine);
         markupInLine.setKeyboard(rowsInLine);
         msg.setReplyMarkup(markupInLine);
-        try {
-            execute(msg);
-        } catch (TelegramApiException e) {
-            log.error("Error occured: " + e.getMessage());
-        }
+        executeMessege(msg);
     }
 
     private void registerUser(Message msg) {
@@ -179,10 +168,34 @@ public class TelegramBot extends TelegramLongPollingBot {
         message.setChatId(String.valueOf(chatId));
         message.setText(text);
         message.setReplyMarkup(keyboardMarkup);
+        executeMessege(message);
+    }
+    private void executeMessegeText (String text, long chatId, long messageId) {
+        EditMessageText message = new EditMessageText();
+        message.setChatId(String.valueOf(chatId));
+        message.setText(text);
+        message.setMessageId((int)messageId);
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            log.error("Error occured: " + e.getMessage());
+            log.error(ERROR_TEXT + e.getMessage());
+        }
+    }
+    private void executeMessege (SendMessage message) {
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            log.error(ERROR_TEXT + e.getMessage());
+        }
+    }
+    @Scheduled(cron = "${cron.scheduler}")
+    private void sendAds () {
+        var ads = adsRepository.findAll();
+        var users = userRepository.findAll();
+        for (Ads ad: ads) {
+            for (User user: users) {
+                sendMessage(user.getChatId(), ad.getAd(), null);
+            }
         }
     }
 }
